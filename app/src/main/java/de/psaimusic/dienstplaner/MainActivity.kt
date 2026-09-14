@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
-import de.psaimusic.dienstplaner.ui.ResponsiveDienstplanApp
+import de.psaimusic.dienstplaner.ui.SchichtPilotV3
 import de.psaimusic.dienstplaner.ui.theme.DienstplanerTheme
 
 class MainActivity : ComponentActivity() {
@@ -14,7 +14,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         setContent {
             DienstplanerTheme {
-                ResponsiveDienstplanApp()
+                SchichtPilotV3()
             }
         }
     }
