@@ -1,5 +1,6 @@
 package de.psaimusic.dienstplaner.planner
 
+import de.psaimusic.dienstplaner.AppGlobals
 import de.psaimusic.dienstplaner.data.Absence
 import de.psaimusic.dienstplaner.data.Assignment
 import de.psaimusic.dienstplaner.data.Employee
@@ -23,6 +24,7 @@ object AutoPlanner {
         rules: PlannerRules
     ): PlanResult {
         if (employees.isEmpty()) {
+            AppGlobals.store()?.saveAssignments(emptyList())
             return PlanResult(emptyList(), listOf("Noch keine Mitarbeiter angelegt."))
         }
 
@@ -61,6 +63,7 @@ object AutoPlanner {
             }
         }
 
+        AppGlobals.store()?.saveAssignments(assignments)
         return PlanResult(assignments, warnings.distinct())
     }
 
