@@ -10,6 +10,7 @@ import de.psaimusic.dienstplaner.ui.theme.DienstplanerTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppGlobals.init(applicationContext)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         setContent {
             DienstplanerTheme {
