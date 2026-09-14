@@ -118,6 +118,35 @@ class AppStore(context: Context) {
         prefs.edit().putString("absences", array.toString()).apply()
     }
 
+    fun loadAssignments(): List<Assignment> = runCatching {
+        val array = JSONArray(prefs.getString("assignments", "[]"))
+        buildList {
+            for (i in 0 until array.length()) {
+                val o = array.getJSONObject(i)
+                add(
+                    Assignment(
+                        date = LocalDate.parse(o.getString("date")),
+                        shiftId = o.getString("shiftId"),
+                        employeeId = o.getLong("employeeId")
+                    )
+                )
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    fun saveAssignments(items: List<Assignment>) {
+        val array = JSONArray()
+        items.forEach { a ->
+            array.put(
+                JSONObject()
+                    .put("date", a.date.toString())
+                    .put("shiftId", a.shiftId)
+                    .put("employeeId", a.employeeId)
+            )
+        }
+        prefs.edit().putString("assignments", array.toString()).apply()
+    }
+
     fun loadRules(): PlannerRules = PlannerRules(
         maxConsecutiveDays = prefs.getInt("rule_max_consecutive", 5),
         minRestHours = prefs.getInt("rule_min_rest", 11),
