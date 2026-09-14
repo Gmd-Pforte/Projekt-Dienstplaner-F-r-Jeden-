@@ -17,19 +17,29 @@ data class PlanResult(
 )
 
 object AutoPlanner {
+    /**
+     * Erzeugt ausschließlich neue Dienste für den angeforderten Zeitraum.
+     * historyAssignments werden NICHT zurückgegeben, aber bei allen Regeln
+     * berücksichtigt. Dadurch wirken Vormonat, Ruhezeiten und Serien über
+     * Monatsgrenzen hinweg korrekt weiter.
+     */
     fun generate(
         start: LocalDate,
         days: Int,
         employees: List<Employee>,
         shifts: List<ShiftTemplate>,
         absences: List<Absence>,
-        rules: PlannerRules
+        rules: PlannerRules,
+        historyAssignments: List<Assignment> = emptyList()
     ): PlanResult {
         if (employees.isEmpty()) {
             return PlanResult(emptyList(), listOf("Noch keine Mitarbeiter angelegt."))
         }
 
-        val assignments = mutableListOf<Assignment>()
+        val generated = mutableListOf<Assignment>()
+        val history = historyAssignments
+            .filter { it.date.isBefore(start) }
+            .sortedBy { it.date }
         val warnings = mutableListOf<String>()
         val enabledShifts = shifts.filter { it.enabled }
 
@@ -37,13 +47,14 @@ object AutoPlanner {
             val date = start.plusDays(offset.toLong())
             enabledShifts.forEach { shift ->
                 repeat(shift.requiredEmployees.coerceAtLeast(1)) { slot ->
+                    val workingAssignments = history + generated
                     val eligible = employees
                         .filter { employee ->
                             canWork(
                                 employee = employee,
                                 date = date,
                                 shift = shift,
-                                assignments = assignments,
+                                assignments = workingAssignments,
                                 shifts = enabledShifts,
                                 absences = absences,
                                 rules = rules
@@ -52,12 +63,13 @@ object AutoPlanner {
                         .sortedWith(
                             compareBy<Employee> { employee ->
                                 if (rules.distributeWeekendsFairly && isWeekend(date)) {
-                                    assignments.count { a ->
+                                    workingAssignments.count { a ->
                                         a.employeeId == employee.id && isWeekend(a.date)
                                     }
                                 } else 0
                             }.thenBy { employee ->
-                                assignments.count { it.employeeId == employee.id }
+                                // Für Fairness zählt der aktuelle Planzeitraum stärker als alte Monate.
+                                generated.count { it.employeeId == employee.id }
                             }.thenBy { it.name.lowercase() }
                         )
 
@@ -65,13 +77,13 @@ object AutoPlanner {
                     if (picked == null) {
                         warnings += "${date.dayOfMonth}.${date.monthValue}. · ${shift.name}: Platz ${slot + 1} unbesetzt"
                     } else {
-                        assignments += Assignment(date, shift.id, picked.id)
+                        generated += Assignment(date, shift.id, picked.id)
                     }
                 }
             }
         }
 
-        return PlanResult(assignments, warnings.distinct())
+        return PlanResult(generated, warnings.distinct())
     }
 
     private fun canWork(
@@ -91,6 +103,8 @@ object AutoPlanner {
         if (shift.id == "night" && !employee.allowNight) return false
         if (assignments.any { it.employeeId == employee.id && it.date == date }) return false
 
+        // Wochenlimit berücksichtigt auch Tage aus dem Vormonat, wenn die Woche
+        // über die Monatsgrenze läuft.
         val weekStart = date.minusDays((date.dayOfWeek.value - 1).toLong())
         val weekEnd = weekStart.plusDays(6)
         val uniqueWorkDaysThisWeek = assignments
@@ -101,7 +115,11 @@ object AutoPlanner {
         if (uniqueWorkDaysThisWeek >= employee.maxDaysPerWeek) return false
 
         if (!employee.allowShiftChange) {
-            val existingShift = assignments.firstOrNull { it.employeeId == employee.id }?.shiftId
+            // Bei fester Schicht orientieren wir uns an der zuletzt bekannten Schicht.
+            val existingShift = assignments
+                .filter { it.employeeId == employee.id && it.date.isBefore(date.plusDays(1)) }
+                .maxByOrNull { it.date }
+                ?.shiftId
             if (existingShift != null && existingShift != shift.id) return false
         }
 
@@ -130,6 +148,7 @@ object AutoPlanner {
             if (restHours < rules.minRestHours) return false
         }
 
+        // Serie läuft über Monatsgrenzen weiter, weil historyAssignments enthalten sind.
         val workedPreviousDays = generateSequence(date.minusDays(1)) { it.minusDays(1) }
             .take(rules.maxConsecutiveDays)
             .takeWhile { previous -> assignments.any { it.employeeId == employee.id && it.date == previous } }
