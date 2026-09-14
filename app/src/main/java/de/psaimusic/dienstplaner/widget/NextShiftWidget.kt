@@ -3,6 +3,7 @@ package de.psaimusic.dienstplaner.widget
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
@@ -49,5 +50,18 @@ class NextShiftWidget : AppWidgetProvider() {
         )
         views.setOnClickPendingIntent(R.id.widgetRoot, pendingIntent)
         manager.updateAppWidget(widgetId, views)
+    }
+
+    companion object {
+        fun refresh(context: Context) {
+            val manager = AppWidgetManager.getInstance(context)
+            val ids = manager.getAppWidgetIds(ComponentName(context, NextShiftWidget::class.java))
+            if (ids.isEmpty()) return
+            val intent = Intent(context, NextShiftWidget::class.java).apply {
+                action = AppWidgetManager.ACTION_APPWIDGET_UPDATE
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+            }
+            context.sendBroadcast(intent)
+        }
     }
 }
