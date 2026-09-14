@@ -1,13 +1,15 @@
 package de.psaimusic.dienstplaner.planner
 
-import de.psaimusic.dienstplaner.AppGlobals
 import de.psaimusic.dienstplaner.data.Absence
 import de.psaimusic.dienstplaner.data.Assignment
 import de.psaimusic.dienstplaner.data.Employee
 import de.psaimusic.dienstplaner.data.PlannerRules
 import de.psaimusic.dienstplaner.data.ShiftTemplate
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 
 data class PlanResult(
     val assignments: List<Assignment>,
@@ -24,7 +26,6 @@ object AutoPlanner {
         rules: PlannerRules
     ): PlanResult {
         if (employees.isEmpty()) {
-            AppGlobals.store()?.saveAssignments(emptyList())
             return PlanResult(emptyList(), listOf("Noch keine Mitarbeiter angelegt."))
         }
 
@@ -32,7 +33,7 @@ object AutoPlanner {
         val warnings = mutableListOf<String>()
         val enabledShifts = shifts.filter { it.enabled }
 
-        repeat(days) { offset ->
+        repeat(days.coerceIn(1, 31)) { offset ->
             val date = start.plusDays(offset.toLong())
             enabledShifts.forEach { shift ->
                 repeat(shift.requiredEmployees.coerceAtLeast(1)) { slot ->
@@ -43,12 +44,19 @@ object AutoPlanner {
                                 date = date,
                                 shift = shift,
                                 assignments = assignments,
+                                shifts = enabledShifts,
                                 absences = absences,
                                 rules = rules
                             )
                         }
                         .sortedWith(
                             compareBy<Employee> { employee ->
+                                if (rules.distributeWeekendsFairly && isWeekend(date)) {
+                                    assignments.count { a ->
+                                        a.employeeId == employee.id && isWeekend(a.date)
+                                    }
+                                } else 0
+                            }.thenBy { employee ->
                                 assignments.count { it.employeeId == employee.id }
                             }.thenBy { it.name.lowercase() }
                         )
@@ -63,7 +71,6 @@ object AutoPlanner {
             }
         }
 
-        AppGlobals.store()?.saveAssignments(assignments)
         return PlanResult(assignments, warnings.distinct())
     }
 
@@ -72,6 +79,7 @@ object AutoPlanner {
         date: LocalDate,
         shift: ShiftTemplate,
         assignments: List<Assignment>,
+        shifts: List<ShiftTemplate>,
         absences: List<Absence>,
         rules: PlannerRules
     ): Boolean {
@@ -79,10 +87,8 @@ object AutoPlanner {
             return false
         }
 
-        val weekend = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
-        if (weekend && !employee.allowWeekend) return false
+        if (isWeekend(date) && !employee.allowWeekend) return false
         if (shift.id == "night" && !employee.allowNight) return false
-
         if (assignments.any { it.employeeId == employee.id && it.date == date }) return false
 
         val weekStart = date.minusDays((date.dayOfWeek.value - 1).toLong())
@@ -108,6 +114,22 @@ object AutoPlanner {
             }
         }
 
+        val candidateStart = shiftStart(date, shift)
+        val previousEnd = assignments
+            .filter { it.employeeId == employee.id }
+            .mapNotNull { assignment ->
+                shifts.firstOrNull { it.id == assignment.shiftId }?.let { previousShift ->
+                    shiftEnd(assignment.date, previousShift)
+                }
+            }
+            .filter { !it.isAfter(candidateStart) }
+            .maxOrNull()
+
+        if (previousEnd != null) {
+            val restHours = Duration.between(previousEnd, candidateStart).toMinutes() / 60.0
+            if (restHours < rules.minRestHours) return false
+        }
+
         val workedPreviousDays = generateSequence(date.minusDays(1)) { it.minusDays(1) }
             .take(rules.maxConsecutiveDays)
             .takeWhile { previous -> assignments.any { it.employeeId == employee.id && it.date == previous } }
@@ -116,4 +138,16 @@ object AutoPlanner {
 
         return true
     }
+
+    private fun shiftStart(date: LocalDate, shift: ShiftTemplate): LocalDateTime =
+        date.atTime(LocalTime.parse(shift.start))
+
+    private fun shiftEnd(date: LocalDate, shift: ShiftTemplate): LocalDateTime {
+        val start = LocalTime.parse(shift.start)
+        val end = LocalTime.parse(shift.end)
+        return if (end <= start) date.plusDays(1).atTime(end) else date.atTime(end)
+    }
+
+    private fun isWeekend(date: LocalDate): Boolean =
+        date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
 }
